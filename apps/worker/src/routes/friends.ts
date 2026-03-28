@@ -8,11 +8,16 @@ import {
   getFriendTags,
   getScenarios,
   enrollFriendInScenario,
+  upsertFriend,
+  getLineAccountById,
+  getScenarioSteps,
+  advanceFriendScenario,
+  completeFriendScenario,
   jstNow,
 } from '@line-crm/db';
 import type { Friend as DbFriend, Tag as DbTag } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
-import { buildMessage } from '../services/step-delivery.js';
+import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
 const friends = new Hono<Env>();
@@ -339,6 +344,121 @@ friends.post('/api/friends/:id/messages', async (c) => {
     return c.json({ success: true, data: { messageId: logId } });
   } catch (err) {
     console.error('POST /api/friends/:id/messages error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/friends/sync - external system friend sync (Supabase etc.)
+friends.post('/api/friends/sync', async (c) => {
+  try {
+    const body = await c.req.json<{
+      lineUserId: string;
+      channelId?: string;
+    }>();
+
+    if (!body.lineUserId) {
+      return c.json({ success: false, error: 'lineUserId is required' }, 400);
+    }
+
+    // LINE user IDs must be "U" followed by 32 lowercase hex characters
+    if (!/^U[0-9a-f]{32}$/.test(body.lineUserId)) {
+      return c.json({ success: false, error: 'Invalid lineUserId format. Expected U followed by 32 hex characters.' }, 400);
+    }
+
+    const db = c.env.DB;
+
+    // Resolve LINE account for profile fetch
+    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    let lineAccountId: string | null = null;
+    if (body.channelId) {
+      const row = await db
+        .prepare('SELECT id, channel_access_token FROM line_accounts WHERE channel_id = ? AND is_active = 1')
+        .bind(body.channelId)
+        .first<{ id: string; channel_access_token: string }>();
+      if (row) {
+        accessToken = row.channel_access_token;
+        lineAccountId = row.id;
+      }
+    }
+
+    // Fetch LINE profile
+    const { LineClient } = await import('@line-crm/line-sdk');
+    const lineClient = new LineClient(accessToken);
+    let profile;
+    try {
+      profile = await lineClient.getProfile(body.lineUserId);
+    } catch (err) {
+      console.error('Friend sync: profile fetch failed', body.lineUserId, err);
+    }
+
+    // Upsert friend
+    const friend = await upsertFriend(db, {
+      lineUserId: body.lineUserId,
+      displayName: profile?.displayName ?? null,
+      pictureUrl: profile?.pictureUrl ?? null,
+      statusMessage: profile?.statusMessage ?? null,
+    });
+
+    // Set line_account_id
+    if (lineAccountId) {
+      await db.prepare('UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL')
+        .bind(lineAccountId, friend.id).run();
+    }
+
+    // Enroll in friend_add scenarios + immediate Day 0 delivery
+    const scenarios = await getScenarios(db);
+    let enrolled = 0;
+    for (const scenario of scenarios) {
+      const accountMatch = !scenario.line_account_id || !lineAccountId || scenario.line_account_id === lineAccountId;
+      if (scenario.trigger_type === 'friend_add' && scenario.is_active && accountMatch) {
+        const existing = await db
+          .prepare('SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?')
+          .bind(friend.id, scenario.id)
+          .first<{ id: string }>();
+        if (!existing) {
+          const friendScenario = await enrollFriendInScenario(db, friend.id, scenario.id);
+          enrolled++;
+
+          // Immediate delivery: if first step has delay_minutes=0, send now via pushMessage
+          const steps = await getScenarioSteps(db, scenario.id);
+          const firstStep = steps[0];
+          if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
+            try {
+              const expandedContent = expandVariables(firstStep.message_content, friend as { id: string; display_name: string | null; user_id: string | null });
+              const { LineClient } = await import('@line-crm/line-sdk');
+              const pushClient = new LineClient(accessToken);
+              const message = buildMessage(firstStep.message_type, expandedContent);
+              await pushClient.pushMessage(friend.line_user_id, [message]);
+
+              // Log outgoing message
+              const logId = crypto.randomUUID();
+              await db
+                .prepare(
+                  `INSERT INTO messages_log (id, friend_id, direction, message_type, content, scenario_step_id, delivery_type, created_at)
+                   VALUES (?, ?, 'outgoing', ?, ?, ?, 'push', ?)`,
+                )
+                .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, jstNow())
+                .run();
+
+              // Advance to step 2 or complete
+              const secondStep = steps[1] ?? null;
+              if (secondStep) {
+                await advanceFriendScenario(db, friendScenario.id, firstStep.step_order, jstNow());
+              } else {
+                await completeFriendScenario(db, friendScenario.id);
+              }
+            } catch (err) {
+              console.error('Sync: immediate delivery failed', scenario.id, err);
+              // Non-fatal: cron will pick it up within 5 minutes
+            }
+          }
+        }
+      }
+    }
+
+    return c.json({ success: true, data: { friendId: friend.id, enrolled } }, 201);
+  } catch (err) {
+    console.error('POST /api/friends/sync error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
