@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import {
   getBroadcasts,
   getBroadcastById,
+  getLineAccountById,
   createBroadcast,
   updateBroadcast,
   deleteBroadcast,
@@ -191,7 +192,17 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
       return c.json({ success: false, error: 'Broadcast is already sent or sending' }, 400);
     }
 
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const lineAccountId = existing.line_account_id ?? null;
+    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (lineAccountId) {
+      const account = await getLineAccountById(c.env.DB, lineAccountId);
+      if (!account || !account.is_active) {
+        return c.json({ success: false, error: 'Associated LINE account is missing or inactive' }, 400);
+      }
+      accessToken = account.channel_access_token;
+    }
+
+    const lineClient = new LineClient(accessToken);
     await processBroadcastSend(c.env.DB, lineClient, id);
 
     const result = await getBroadcastById(c.env.DB, id);
@@ -225,8 +236,18 @@ broadcasts.post('/api/broadcasts/:id/send-segment', async (c) => {
       );
     }
 
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
-    await processSegmentSend(c.env.DB, lineClient, id, body.conditions);
+    const lineAccountId = existing.line_account_id ?? null;
+    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (lineAccountId) {
+      const account = await getLineAccountById(c.env.DB, lineAccountId);
+      if (!account || !account.is_active) {
+        return c.json({ success: false, error: 'Associated LINE account is missing or inactive' }, 400);
+      }
+      accessToken = account.channel_access_token;
+    }
+
+    const lineClient = new LineClient(accessToken);
+    await processSegmentSend(c.env.DB, lineClient, id, body.conditions, lineAccountId);
 
     const result = await getBroadcastById(c.env.DB, id);
     return c.json({ success: true, data: result ? serializeBroadcast(result) : null });

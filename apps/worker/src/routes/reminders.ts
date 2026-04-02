@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import {
   getReminders,
   getReminderById,
+  getFriendById,
   createReminder,
   updateReminder,
   deleteReminder,
@@ -160,6 +161,15 @@ reminders.post('/api/reminders/:id/enroll/:friendId', async (c) => {
     const friendId = c.req.param('friendId');
     const body = await c.req.json<{ targetDate: string }>();
     if (!body.targetDate) return c.json({ success: false, error: 'targetDate is required' }, 400);
+    const [reminder, friend] = await Promise.all([
+      getReminderById(c.env.DB, reminderId),
+      getFriendById(c.env.DB, friendId),
+    ]);
+    if (!reminder) return c.json({ success: false, error: 'Reminder not found' }, 404);
+    if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+    if (reminder.line_account_id && friend.line_account_id && reminder.line_account_id !== friend.line_account_id) {
+      return c.json({ success: false, error: 'Friend and reminder belong to different LINE accounts' }, 400);
+    }
     const enrollment = await enrollFriendInReminder(c.env.DB, { friendId, reminderId, targetDate: body.targetDate });
     return c.json({
       success: true,

@@ -10,6 +10,7 @@ export interface Broadcast {
   message_content: string;
   target_type: BroadcastTargetType;
   target_tag_id: string | null;
+  line_account_id: string | null;
   status: BroadcastStatus;
   scheduled_at: string | null;
   sent_at: string | null;
@@ -22,6 +23,20 @@ export async function getBroadcasts(db: D1Database): Promise<Broadcast[]> {
   const result = await db
     .prepare(`SELECT * FROM broadcasts ORDER BY created_at DESC`)
     .all<Broadcast>();
+  return result.results;
+}
+
+export async function getBroadcastsByLineAccountId(
+  db: D1Database,
+  lineAccountId: string | null,
+): Promise<Broadcast[]> {
+  const query = lineAccountId
+    ? `SELECT * FROM broadcasts WHERE line_account_id = ? ORDER BY created_at DESC`
+    : `SELECT * FROM broadcasts WHERE line_account_id IS NULL ORDER BY created_at DESC`;
+  const stmt = db.prepare(query);
+  const result = lineAccountId
+    ? await stmt.bind(lineAccountId).all<Broadcast>()
+    : await stmt.all<Broadcast>();
   return result.results;
 }
 
@@ -172,4 +187,19 @@ export async function updateBroadcastStatus(
     .prepare(`UPDATE broadcasts SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...values)
     .run();
+}
+
+/**
+ * Atomically claim a scheduled broadcast for processing.
+ * Returns true only for the first worker that transitions scheduled -> sending.
+ */
+export async function claimScheduledBroadcastForSending(
+  db: D1Database,
+  id: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare(`UPDATE broadcasts SET status = 'sending' WHERE id = ? AND status = 'scheduled'`)
+    .bind(id)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
 }

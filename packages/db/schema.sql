@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS friends (
   status_message   TEXT,
   is_following     INTEGER NOT NULL DEFAULT 1,
   user_id          TEXT,
+  line_account_id  TEXT REFERENCES line_accounts (id),
   score            INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
   description     TEXT,
   trigger_type    TEXT NOT NULL CHECK (trigger_type IN ('friend_add', 'tag_added', 'manual')),
   trigger_tag_id  TEXT REFERENCES tags (id) ON DELETE SET NULL,
+  line_account_id TEXT,
   is_active       INTEGER NOT NULL DEFAULT 1,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
@@ -100,6 +102,7 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   message_content TEXT NOT NULL,
   target_type     TEXT NOT NULL CHECK (target_type IN ('all', 'tag')) DEFAULT 'all',
   target_tag_id   TEXT REFERENCES tags (id) ON DELETE SET NULL,
+  line_account_id TEXT,
   status          TEXT NOT NULL CHECK (status IN ('draft', 'scheduled', 'sending', 'sent')) DEFAULT 'draft',
   scheduled_at    TEXT,
   sent_at         TEXT,
@@ -126,6 +129,14 @@ CREATE TABLE IF NOT EXISTS messages_log (
 
 CREATE INDEX IF NOT EXISTS idx_messages_log_friend_id ON messages_log (friend_id);
 CREATE INDEX IF NOT EXISTS idx_messages_log_created_at ON messages_log (created_at);
+
+CREATE TABLE IF NOT EXISTS scenario_step_deliveries (
+  id               TEXT PRIMARY KEY,
+  friend_scenario_id TEXT NOT NULL REFERENCES friend_scenarios (id) ON DELETE CASCADE,
+  scenario_step_id TEXT NOT NULL REFERENCES scenario_steps (id) ON DELETE CASCADE,
+  delivered_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  UNIQUE (friend_scenario_id, scenario_step_id)
+);
 
 -- ============================================================
 -- Auto Replies
@@ -176,6 +187,10 @@ CREATE TABLE IF NOT EXISTS line_accounts (
   name                 TEXT NOT NULL,
   channel_access_token TEXT NOT NULL,
   channel_secret       TEXT NOT NULL,
+  login_channel_id     TEXT,
+  login_channel_secret TEXT,
+  liff_id              TEXT,
+  token_expires_at     TEXT,
   is_active            INTEGER NOT NULL DEFAULT 1,
   created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
@@ -297,6 +312,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   description TEXT,
+  line_account_id TEXT,
   is_active   INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
@@ -391,6 +407,7 @@ CREATE TABLE IF NOT EXISTS chats (
   id            TEXT PRIMARY KEY,
   friend_id     TEXT NOT NULL REFERENCES friends (id) ON DELETE CASCADE,
   operator_id   TEXT REFERENCES operators (id) ON DELETE SET NULL,
+  line_account_id TEXT,
   status        TEXT NOT NULL DEFAULT 'unread' CHECK (status IN ('unread', 'in_progress', 'resolved')),
   notes         TEXT,
   last_message_at TEXT,
@@ -482,6 +499,7 @@ CREATE TABLE IF NOT EXISTS automations (
   name        TEXT NOT NULL,
   description TEXT,
   event_type  TEXT NOT NULL,
+  line_account_id TEXT,
   conditions  TEXT NOT NULL DEFAULT '{}',
   actions     TEXT NOT NULL DEFAULT '[]',
   is_active   INTEGER NOT NULL DEFAULT 1,

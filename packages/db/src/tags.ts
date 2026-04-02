@@ -100,16 +100,22 @@ import type { Friend } from './friends';
 export async function getFriendsByTag(
   db: D1Database,
   tagId: string,
+  lineAccountId?: string | null,
 ): Promise<Friend[]> {
-  const result = await db
-    .prepare(
-      `SELECT f.*
-       FROM friends f
-       INNER JOIN friend_tags ft ON ft.friend_id = f.id
-       WHERE ft.tag_id = ?
-       ORDER BY f.created_at DESC`,
-    )
-    .bind(tagId)
-    .all<Friend>();
+  const query = lineAccountId
+    ? `SELECT f.*
+         FROM friends f
+         INNER JOIN friend_tags ft ON ft.friend_id = f.id
+         WHERE ft.tag_id = ? AND f.line_account_id = ?
+         ORDER BY f.created_at DESC`
+    : `SELECT f.*
+         FROM friends f
+         INNER JOIN friend_tags ft ON ft.friend_id = f.id
+         WHERE ft.tag_id = ? AND f.line_account_id IS NULL
+         ORDER BY f.created_at DESC`;
+  const stmt = db.prepare(query);
+  const result = lineAccountId
+    ? await stmt.bind(tagId, lineAccountId).all<Friend>()
+    : await stmt.bind(tagId).all<Friend>();
   return result.results;
 }

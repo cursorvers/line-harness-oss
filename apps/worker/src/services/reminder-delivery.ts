@@ -18,9 +18,10 @@ import { addJitter, sleep } from './stealth.js';
 export async function processReminderDeliveries(
   db: D1Database,
   lineClient: LineClient,
+  lineAccountId?: string | null,
 ): Promise<void> {
   const now = jstNow();
-  const dueReminders = await getDueReminderDeliveries(db, now);
+  const dueReminders = await getDueReminderDeliveries(db, now, lineAccountId);
 
   for (let i = 0; i < dueReminders.length; i++) {
     const fr = dueReminders[i];
@@ -37,21 +38,34 @@ export async function processReminderDeliveries(
       }
 
       for (const step of fr.steps) {
+        const claimed = await markReminderStepDelivered(db, fr.id, step.id);
+        if (!claimed) {
+          continue;
+        }
+
         const message = buildMessage(step.message_type, step.message_content);
-        await lineClient.pushMessage(friend.line_user_id, [message]);
+        try {
+          await lineClient.pushMessage(friend.line_user_id, [message]);
 
-        // メッセージログに記録
-        const logId = crypto.randomUUID();
-        await db
-          .prepare(
-            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at)
-             VALUES (?, ?, 'outgoing', ?, ?, ?)`,
-          )
-          .bind(logId, friend.id, step.message_type, step.message_content, jstNow())
-          .run();
-
-        // 配信済みを記録
-        await markReminderStepDelivered(db, fr.id, step.id);
+          // メッセージログに記録
+          const logId = crypto.randomUUID();
+          await db
+            .prepare(
+              `INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at)
+               VALUES (?, ?, 'outgoing', ?, ?, ?)`,
+            )
+            .bind(logId, friend.id, step.message_type, step.message_content, jstNow())
+            .run();
+        } catch (err) {
+          await db
+            .prepare(
+              `DELETE FROM friend_reminder_deliveries
+               WHERE friend_reminder_id = ? AND reminder_step_id = ?`,
+            )
+            .bind(fr.id, step.id)
+            .run();
+          throw err;
+        }
       }
 
       // 全ステップ配信済みかチェック

@@ -43,6 +43,10 @@ export interface FriendScenario {
   updated_at: string;
 }
 
+export interface DueFriendScenario extends FriendScenario {
+  line_account_id: string | null;
+}
+
 // ============================================================
 // Scenario CRUD
 // ============================================================
@@ -60,6 +64,34 @@ export async function getScenarios(db: D1Database): Promise<ScenarioWithStepCoun
     )
     .all<ScenarioWithStepCount>();
   return result.results;
+}
+
+export async function getFriendScenariosDueForDelivery(
+  db: D1Database,
+  now: string,
+  lineAccountId?: string | null,
+): Promise<DueFriendScenario[]> {
+  const nowMs = new Date(now).getTime();
+  const query = lineAccountId
+    ? `SELECT fs.*, s.line_account_id
+         FROM friend_scenarios fs
+         INNER JOIN scenarios s ON s.id = fs.scenario_id
+        WHERE fs.status = 'active'
+          AND fs.next_delivery_at IS NOT NULL
+          AND s.line_account_id = ?`
+    : `SELECT fs.*, s.line_account_id
+         FROM friend_scenarios fs
+         INNER JOIN scenarios s ON s.id = fs.scenario_id
+        WHERE fs.status = 'active'
+          AND fs.next_delivery_at IS NOT NULL
+          AND s.line_account_id IS NULL`;
+  const stmt = db.prepare(query);
+  const result = lineAccountId
+    ? await stmt.bind(lineAccountId).all<DueFriendScenario>()
+    : await stmt.all<DueFriendScenario>();
+  return result.results
+    .filter((fs) => new Date(fs.next_delivery_at!).getTime() <= nowMs)
+    .sort((a, b) => new Date(a.next_delivery_at!).getTime() - new Date(b.next_delivery_at!).getTime());
 }
 
 export async function getScenarioById(
@@ -355,25 +387,6 @@ export async function enrollFriendInScenario(
     .prepare(`SELECT * FROM friend_scenarios WHERE id = ?`)
     .bind(id)
     .first<FriendScenario>())!;
-}
-
-export async function getFriendScenariosDueForDelivery(
-  db: D1Database,
-  now: string,
-): Promise<FriendScenario[]> {
-  // Fetch all active scenarios with a delivery time, then filter by epoch comparison
-  // to handle mixed timestamp formats (Z and +09:00) during migration
-  const result = await db
-    .prepare(
-      `SELECT * FROM friend_scenarios
-       WHERE status = 'active'
-         AND next_delivery_at IS NOT NULL`,
-    )
-    .all<FriendScenario>();
-  const nowMs = new Date(now).getTime();
-  return result.results
-    .filter((fs) => new Date(fs.next_delivery_at!).getTime() <= nowMs)
-    .sort((a, b) => new Date(a.next_delivery_at!).getTime() - new Date(b.next_delivery_at!).getTime());
 }
 
 export async function advanceFriendScenario(

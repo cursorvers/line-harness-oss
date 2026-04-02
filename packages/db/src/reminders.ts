@@ -5,6 +5,7 @@ export interface ReminderRow {
   id: string;
   name: string;
   description: string | null;
+  line_account_id: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -120,13 +121,23 @@ export async function cancelFriendReminder(db: D1Database, id: string): Promise<
 }
 
 /** リマインダ配信処理用: 配信が必要な友だちリマインダを取得 */
-export async function getDueReminderDeliveries(db: D1Database, now: string): Promise<Array<FriendReminderRow & { steps: ReminderStepRow[] }>> {
+export async function getDueReminderDeliveries(
+  db: D1Database,
+  now: string,
+  lineAccountId?: string | null,
+): Promise<Array<FriendReminderRow & { steps: ReminderStepRow[] }>> {
   // activeなリマインダ登録を取得
-  const activeReminders = await db
-    .prepare(`SELECT fr.* FROM friend_reminders fr
-              INNER JOIN reminders r ON r.id = fr.reminder_id
-              WHERE fr.status = 'active' AND r.is_active = 1`)
-    .all<FriendReminderRow>();
+  const query = lineAccountId
+    ? `SELECT fr.* FROM friend_reminders fr
+         INNER JOIN reminders r ON r.id = fr.reminder_id
+        WHERE fr.status = 'active' AND r.is_active = 1 AND r.line_account_id = ?`
+    : `SELECT fr.* FROM friend_reminders fr
+         INNER JOIN reminders r ON r.id = fr.reminder_id
+        WHERE fr.status = 'active' AND r.is_active = 1 AND r.line_account_id IS NULL`;
+  const stmt = db.prepare(query);
+  const activeReminders = lineAccountId
+    ? await stmt.bind(lineAccountId).all<FriendReminderRow>()
+    : await stmt.all<FriendReminderRow>();
 
   const results: Array<FriendReminderRow & { steps: ReminderStepRow[] }> = [];
   for (const fr of activeReminders.results) {
@@ -153,10 +164,17 @@ export async function getDueReminderDeliveries(db: D1Database, now: string): Pro
 }
 
 /** 配信済みを記録 */
-export async function markReminderStepDelivered(db: D1Database, friendReminderId: string, reminderStepId: string): Promise<void> {
+export async function markReminderStepDelivered(
+  db: D1Database,
+  friendReminderId: string,
+  reminderStepId: string,
+): Promise<boolean> {
   const id = crypto.randomUUID();
-  await db.prepare(`INSERT OR IGNORE INTO friend_reminder_deliveries (id, friend_reminder_id, reminder_step_id) VALUES (?, ?, ?)`)
-    .bind(id, friendReminderId, reminderStepId).run();
+  const result = await db
+    .prepare(`INSERT OR IGNORE INTO friend_reminder_deliveries (id, friend_reminder_id, reminder_step_id) VALUES (?, ?, ?)`)
+    .bind(id, friendReminderId, reminderStepId)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 /** 全ステップ配信済みならcompletedにする */
