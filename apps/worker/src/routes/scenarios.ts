@@ -314,6 +314,9 @@ scenarios.post('/api/scenarios/:id/enroll/:friendId', async (c) => {
     if (!friend) {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
+    if (scenario.line_account_id && friend.line_account_id && scenario.line_account_id !== friend.line_account_id) {
+      return c.json({ success: false, error: 'Friend and scenario belong to different LINE accounts' }, 400);
+    }
 
     const enrollment = await enrollFriendInScenario(db, friendId, scenarioId);
     return c.json({ success: true, data: serializeFriendScenario(enrollment) }, 201);

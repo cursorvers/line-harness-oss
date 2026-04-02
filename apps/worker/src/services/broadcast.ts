@@ -1,6 +1,8 @@
 import {
   getBroadcastById,
   getBroadcasts,
+  getBroadcastsByLineAccountId,
+  claimScheduledBroadcastForSending,
   updateBroadcastStatus,
   getFriendsByTag,
   jstNow,
@@ -41,7 +43,7 @@ export async function processBroadcastSend(
         throw new Error('target_tag_id is required for tag-targeted broadcasts');
       }
 
-      const friends = await getFriendsByTag(db, broadcast.target_tag_id);
+      const friends = await getFriendsByTag(db, broadcast.target_tag_id, broadcast.line_account_id);
       const followingFriends = friends.filter((f) => f.is_following);
       totalCount = followingFriends.length;
 
@@ -100,9 +102,12 @@ export async function processBroadcastSend(
 export async function processScheduledBroadcasts(
   db: D1Database,
   lineClient: LineClient,
+  lineAccountId?: string | null,
 ): Promise<void> {
   const now = jstNow();
-  const allBroadcasts = await getBroadcasts(db);
+  const allBroadcasts = lineAccountId !== undefined
+    ? await getBroadcastsByLineAccountId(db, lineAccountId)
+    : await getBroadcasts(db);
 
   const nowMs = Date.now();
   const scheduled = allBroadcasts.filter(
@@ -113,6 +118,11 @@ export async function processScheduledBroadcasts(
   );
 
   for (const broadcast of scheduled) {
+    const claimed = await claimScheduledBroadcastForSending(db, broadcast.id);
+    if (!claimed) {
+      // Another worker already claimed this scheduled delivery.
+      continue;
+    }
     try {
       await processBroadcastSend(db, lineClient, broadcast.id);
     } catch (err) {

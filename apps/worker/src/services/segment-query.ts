@@ -8,9 +8,19 @@ export interface SegmentCondition {
   rules: SegmentRule[]
 }
 
-export function buildSegmentQuery(condition: SegmentCondition): { sql: string; bindings: unknown[] } {
+export function buildSegmentQuery(
+  condition: SegmentCondition,
+  lineAccountId?: string | null,
+): { sql: string; bindings: unknown[] } {
   const bindings: unknown[] = []
   const clauses: string[] = []
+
+  if (lineAccountId) {
+    clauses.push(`f.line_account_id = ?`)
+    bindings.push(lineAccountId)
+  } else {
+    clauses.push(`f.line_account_id IS NULL`)
+  }
 
   for (const rule of condition.rules) {
     switch (rule.type) {

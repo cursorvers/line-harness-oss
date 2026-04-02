@@ -70,13 +70,14 @@ export async function processStepDeliveries(
   db: D1Database,
   lineClient: LineClient,
   workerUrl?: string,
+  lineAccountId?: string | null,
 ): Promise<void> {
   // Skip delivery outside 9:00-23:00 JST window
   const jstHour = new Date(Date.now() + 9 * 60 * 60_000).getUTCHours();
   if (jstHour < DEFAULT_START_HOUR || jstHour >= DEFAULT_END_HOUR) return;
 
   const now = jstNow();
-  const dueFriendScenarios = await getFriendScenariosDueForDelivery(db, now);
+  const dueFriendScenarios = await getFriendScenariosDueForDelivery(db, now, lineAccountId);
 
   for (let i = 0; i < dueFriendScenarios.length; i++) {
     const fs = dueFriendScenarios[i];
@@ -164,17 +165,38 @@ async function processSingleDelivery(
   // Expand template variables ({{name}}, {{uid}}, {{auth_url:CHANNEL_ID}}, etc.)
   const expandedContent = expandVariables(currentStep.message_content, friend, workerUrl);
   const message = buildMessage(currentStep.message_type, expandedContent);
-  await lineClient.pushMessage(friend.line_user_id, [message]);
-
-  // Log outgoing message
-  const logId = crypto.randomUUID();
-  await db
+  const deliveryClaimId = crypto.randomUUID();
+  const claimResult = await db
     .prepare(
-      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+      `INSERT OR IGNORE INTO scenario_step_deliveries (id, friend_scenario_id, scenario_step_id, delivered_at)
+       VALUES (?, ?, ?, ?)`,
     )
-    .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow())
+    .bind(deliveryClaimId, fs.id, currentStep.id, jstNow())
     .run();
+  if ((claimResult.meta?.changes ?? 0) === 0) {
+    // Another worker already claimed or completed this step.
+    return;
+  }
+
+  try {
+    await lineClient.pushMessage(friend.line_user_id, [message]);
+
+    // Log outgoing message
+    const logId = crypto.randomUUID();
+    await db
+      .prepare(
+        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+         VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+      )
+      .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow())
+      .run();
+  } catch (err) {
+    await db
+      .prepare(`DELETE FROM scenario_step_deliveries WHERE id = ?`)
+      .bind(deliveryClaimId)
+      .run();
+    throw err;
+  }
 
   // Determine next step (find the step after currentStep in the sorted list)
   const currentIndex = steps.indexOf(currentStep);

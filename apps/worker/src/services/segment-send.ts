@@ -21,6 +21,7 @@ export async function processSegmentSend(
   lineClient: LineClient,
   broadcastId: string,
   condition: SegmentCondition,
+  lineAccountId?: string | null,
 ): Promise<Broadcast> {
   // Mark as sending
   await updateBroadcastStatus(db, broadcastId, 'sending');
@@ -37,7 +38,7 @@ export async function processSegmentSend(
 
   try {
     // Build and execute segment query to get matching friends
-    const { sql, bindings } = buildSegmentQuery(condition);
+    const { sql, bindings } = buildSegmentQuery(condition, lineAccountId);
     const queryResult = await db
       .prepare(sql)
       .bind(...bindings)
