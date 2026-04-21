@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CUSTOM_ROUTE="${1:-https://api.example.com}"
 
-if [[ ! "$CUSTOM_ROUTE" =~ ^https?:// ]]; then
-  echo "custom route must start with http:// or https://" >&2
+if [[ ! "$CUSTOM_ROUTE" =~ ^https:// ]]; then
+  echo "custom route must start with https://" >&2
   exit 1
 fi
 

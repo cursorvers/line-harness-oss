@@ -27,7 +27,9 @@ Do not set `workers_dev = false` until every runtime dependency below has been c
    - `/openapi.json`
    - `/t/{linkId}`
 8. Monitor for 24-48 hours with both old and new routes available.
-9. Only then set `workers_dev = false` and redeploy `line-crm-worker`.
+9. Run `CLOUDFLARE_ROUTE_PHASE=post-cutover bash scripts/check_cloudflare_surface.sh`.
+10. Run `bash scripts/audit-workers-dev-references.sh --strict-runtime`.
+11. Only then set `workers_dev = false` and redeploy `line-crm-worker`.
 
 ## Validation checklist
 
@@ -43,6 +45,7 @@ Do not set `workers_dev = false` until every runtime dependency below has been c
 ## Inventory refresh
 
 Use [scripts/audit-workers-dev-references.sh](/Users/masayuki_otawara/Dev/line-harness-oss/scripts/audit-workers-dev-references.sh:1) before and after cutover.
+The post-cutover check must use `--strict-runtime` so runtime/config references fail closed.
 Use [scripts/simulate-cloudflare-cutover.sh](/Users/masayuki_otawara/Dev/line-harness-oss/scripts/simulate-cloudflare-cutover.sh:1) to validate the route-ready configuration before changing external webhooks.
 The target state is:
 

@@ -2,6 +2,11 @@ name: Cloudflare Migration Audit
 
 on:
   workflow_dispatch:
+    inputs:
+      strict_runtime:
+        description: 'Fail if runtime/config workers.dev references remain'
+        required: false
+        default: 'false'
   push:
     branches:
       - main
@@ -11,13 +16,38 @@ on:
       - 'apps/worker/**'
       - 'packages/line-sdk/**'
       - 'packages/shared/**'
+      - 'packages/db/**'
       - 'packages/sdk/**'
       - 'docs/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'scripts/audit-workers-dev-references.sh'
+      - 'scripts/check_cloudflare_surface.sh'
       - 'scripts/simulate-cloudflare-cutover.sh'
       - 'scripts/prepare-cloudflare-cutover.sh'
       - 'scripts/generate-cloudflare-migration-report.sh'
       - '.github/workflows/cloudflare-migration-audit.yml'
+      - '.github/workflows/deploy-worker.yml'
+  pull_request:
+    paths:
+      - 'apps/web/**'
+      - 'apps/worker/**'
+      - 'packages/line-sdk/**'
+      - 'packages/shared/**'
+      - 'packages/db/**'
+      - 'packages/sdk/**'
+      - 'docs/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'scripts/audit-workers-dev-references.sh'
+      - 'scripts/check_cloudflare_surface.sh'
+      - 'scripts/simulate-cloudflare-cutover.sh'
+      - 'scripts/prepare-cloudflare-cutover.sh'
+      - 'scripts/generate-cloudflare-migration-report.sh'
+      - '.github/workflows/cloudflare-migration-audit.yml'
+      - '.github/workflows/deploy-worker.yml'
 
 jobs:
   audit:
@@ -41,6 +71,10 @@ jobs:
 
       - name: Simulate custom-route cutover
         run: bash scripts/simulate-cloudflare-cutover.sh https://api.example.com
+
+      - name: Enforce strict runtime audit
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.strict_runtime == 'true' }}
+        run: bash scripts/audit-workers-dev-references.sh --strict-runtime
 
       - name: Upload migration report
         uses: actions/upload-artifact@v4

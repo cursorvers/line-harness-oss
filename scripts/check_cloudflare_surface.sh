@@ -7,11 +7,26 @@ AUTH_FILE="${ROOT_DIR}/apps/worker/src/middleware/auth.ts"
 WORKER_INDEX="${ROOT_DIR}/apps/worker/src/index.ts"
 FUGUE_BRIDGE_FILE="${ROOT_DIR}/apps/worker/src/routes/fugue-bridge.ts"
 WEBHOOKS_FILE="${ROOT_DIR}/apps/worker/src/routes/webhooks.ts"
+MIGRATION_PHASE="${CLOUDFLARE_ROUTE_PHASE:-pre-cutover}"
 
-grep -q '^workers_dev = true$' "${WORKER_TOML}" || {
-  echo "line-harness guardrail failed: current deployment still expects workers_dev = true until route migration is complete" >&2
-  exit 1
-}
+case "${MIGRATION_PHASE}" in
+  pre-cutover)
+    grep -q '^workers_dev = true$' "${WORKER_TOML}" || {
+      echo "line-harness guardrail failed: pre-cutover deployments still expect workers_dev = true" >&2
+      exit 1
+    }
+    ;;
+  post-cutover)
+    grep -q '^workers_dev = false$' "${WORKER_TOML}" || {
+      echo "line-harness guardrail failed: post-cutover deployments must set workers_dev = false" >&2
+      exit 1
+    }
+    ;;
+  *)
+    echo "line-harness guardrail failed: unsupported CLOUDFLARE_ROUTE_PHASE=${MIGRATION_PHASE}" >&2
+    exit 1
+    ;;
+esac
 
 grep -q '^crons = \["\*/5 \* \* \* \*"\]$' "${WORKER_TOML}" || {
   echo "line-harness guardrail failed: worker cron schedule drifted from the approved */5 cadence" >&2
@@ -43,4 +58,4 @@ grep -q 'Unauthorized webhook signature' "${WEBHOOKS_FILE}" || {
   exit 1
 }
 
-echo "line-harness Cloudflare surface verified"
+echo "line-harness Cloudflare surface verified (${MIGRATION_PHASE})"
