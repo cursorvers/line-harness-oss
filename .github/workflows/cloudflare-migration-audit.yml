@@ -9,9 +9,13 @@ on:
     paths:
       - 'apps/web/**'
       - 'apps/worker/**'
+      - 'packages/line-sdk/**'
+      - 'packages/shared/**'
       - 'packages/sdk/**'
       - 'docs/**'
       - 'scripts/audit-workers-dev-references.sh'
+      - 'scripts/simulate-cloudflare-cutover.sh'
+      - 'scripts/prepare-cloudflare-cutover.sh'
       - 'scripts/generate-cloudflare-migration-report.sh'
       - '.github/workflows/cloudflare-migration-audit.yml'
 

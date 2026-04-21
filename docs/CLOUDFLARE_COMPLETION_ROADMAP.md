@@ -6,14 +6,14 @@ Finish Cloudflare remediation without breaking production integrations.
 
 ## Current completion estimate
 
-- Objective completion: `78%`
-- Remaining slices to production-grade completion: `3`
+- Objective completion: `90%`
+- Remaining slices to production-grade completion: `2`
 
 ## Slices
 
 1. `Done` — stop direct cost-growth paths in `x-auto` and lock down fail-open monitoring/canary behavior.
 2. `Done` — add audit/reporting guardrails and route-cutover runbooks.
-3. `In progress` — make runtime code custom-route-ready and add simulation coverage.
+3. `Done` — make runtime code custom-route-ready, add simulation coverage, and harden public webhook ingress.
 4. `Pending external ops` — switch custom route + webhook destinations + monitor 24-48h.
 5. `Pending external ops` — disable `workers_dev` on `line-crm-worker` and `line-webhook-shadow-proxy`.
 

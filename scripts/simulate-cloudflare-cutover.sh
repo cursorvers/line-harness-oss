@@ -11,6 +11,9 @@ fi
 
 echo "[simulate] custom route: $CUSTOM_ROUTE"
 
+echo "[simulate] building workspace packages required by worker tests"
+pnpm --dir "$ROOT" --filter @line-crm/shared --filter @line-crm/line-sdk build
+
 PUBLIC_BASE_URL="$CUSTOM_ROUTE" \
   pnpm --dir "$ROOT/apps/worker" test
 

@@ -34,9 +34,12 @@ cat > "$OUT_FILE" <<EOF
 
 ## Summary
 
+- Objective completion: 90%
+- Remaining slices to production-grade completion: 2
 - Runtime/config references to \`workers.dev\`: $runtime_count
 - Documentation references to \`workers.dev\`: $doc_count
 - Runbook: [docs/CLOUDFLARE_WORKERS_DEV_MIGRATION.md](docs/CLOUDFLARE_WORKERS_DEV_MIGRATION.md)
+- Roadmap: [docs/CLOUDFLARE_COMPLETION_ROADMAP.md](docs/CLOUDFLARE_COMPLETION_ROADMAP.md)
 
 ## Remaining operational tasks
 
