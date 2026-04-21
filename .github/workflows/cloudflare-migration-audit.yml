@@ -3,7 +3,9 @@ name: Cloudflare Migration Audit
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'codex/**'
     paths:
       - 'apps/web/**'
       - 'apps/worker/**'
