@@ -8,6 +8,9 @@ workers_dev = true
 
 [vars]
 WORKER_URL = "https://line-crm-worker.line-crm-api.workers.dev"
+# Preferred public base URL for route cutover. Leave empty until the custom route is ready.
+PUBLIC_BASE_URL = ""
+PUBLIC_WEBHOOK_MAX_BODY_BYTES = "65536"
 
 [[d1_databases]]
 binding = "DB"

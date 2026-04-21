@@ -16,6 +16,7 @@ import {
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
+import { resolvePublicBaseUrl } from '../services/public-base-url.js';
 import type { Env } from '../index.js';
 
 const webhook = new Hono<Env>();
@@ -61,12 +62,13 @@ webhook.post('/webhook', async (c) => {
   }
 
   const lineClient = new LineClient(channelAccessToken);
+  const publicBaseUrl = resolvePublicBaseUrl(c.env, c.req.url);
 
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, publicBaseUrl);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }

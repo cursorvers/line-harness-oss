@@ -14,6 +14,41 @@ import {
 import type { Env } from '../index.js';
 
 const webhooks = new Hono<Env>();
+const DEFAULT_PUBLIC_WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
+
+function maxPublicWebhookBodyBytes(raw: string | undefined): number {
+  const parsed = Number.parseInt((raw || '').trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_PUBLIC_WEBHOOK_MAX_BODY_BYTES;
+  }
+  return parsed;
+}
+
+function requestExceedsBodyLimit(request: Request, rawLimit: string | undefined): boolean {
+  const contentLength = request.headers.get('content-length');
+  if (!contentLength) return false;
+  const parsed = Number.parseInt(contentLength, 10);
+  return Number.isFinite(parsed) && parsed > maxPublicWebhookBodyBytes(rawLimit);
+}
+
+function rawBodyExceedsBodyLimit(body: string, rawLimit: string | undefined): boolean {
+  return new TextEncoder().encode(body).byteLength > maxPublicWebhookBodyBytes(rawLimit);
+}
+
+async function hmacHex(secret: string, body: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 // ========== 受信Webhook ==========
 
@@ -141,11 +176,27 @@ webhooks.delete('/api/webhooks/outgoing/:id', async (c) => {
 
 webhooks.post('/api/webhooks/incoming/:id/receive', async (c) => {
   try {
+    if (requestExceedsBodyLimit(c.req.raw, c.env.PUBLIC_WEBHOOK_MAX_BODY_BYTES)) {
+      return c.json({ success: false, error: 'Payload Too Large' }, 413);
+    }
+
     const id = c.req.param('id');
     const wh = await getIncomingWebhookById(c.env.DB, id);
     if (!wh || !wh.is_active) return c.json({ success: false, error: 'Webhook not found or inactive' }, 404);
 
-    const body = await c.req.json();
+    const rawBody = await c.req.text();
+    if (rawBodyExceedsBodyLimit(rawBody, c.env.PUBLIC_WEBHOOK_MAX_BODY_BYTES)) {
+      return c.json({ success: false, error: 'Payload Too Large' }, 413);
+    }
+    if (wh.secret) {
+      const provided = (c.req.header('X-Webhook-Signature') || '').trim().toLowerCase();
+      const expected = await hmacHex(wh.secret, rawBody);
+      if (!provided || provided !== expected) {
+        return c.json({ success: false, error: 'Unauthorized webhook signature' }, 401);
+      }
+    }
+
+    const body = JSON.parse(rawBody);
 
     // イベントバスに発火: source_type をイベントタイプとして使用
     const { fireEvent } = await import('../services/event-bus.js');

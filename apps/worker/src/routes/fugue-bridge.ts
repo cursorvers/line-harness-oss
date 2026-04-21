@@ -6,6 +6,15 @@ import type { Env } from '../index.js';
 
 const fugueBridge = new Hono<Env>();
 
+function bridgeTokenConfigured(token: string | undefined): boolean {
+  return Boolean((token || '').trim());
+}
+
+function bridgeTokenAuthorized(request: Request, token: string | undefined): boolean {
+  if (!bridgeTokenConfigured(token)) return true;
+  return (request.headers.get('X-Fugue-Bridge-Token') || '').trim() === (token || '').trim();
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest))
@@ -21,6 +30,10 @@ function isFollowEvent(event: WebhookEvent): event is WebhookEvent & {
 }
 
 fugueBridge.post('/webhooks/line/fugue-bridge', async (c) => {
+  if (!bridgeTokenAuthorized(c.req.raw, c.env.FUGUE_BRIDGE_TOKEN)) {
+    return c.json({ success: false, error: 'Unauthorized bridge request' }, 401);
+  }
+
   const startedAt = Date.now();
   const receivedAt = new Date().toISOString();
   const rawBody = await c.req.text();

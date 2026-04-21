@@ -6,6 +6,8 @@ import { processStepDeliveries } from './services/step-delivery.js';
 import { processScheduledBroadcasts } from './services/broadcast.js';
 import { processReminderDeliveries } from './services/reminder-delivery.js';
 import { checkAccountHealth } from './services/ban-monitor.js';
+import { buildScheduledAccountContexts } from './services/account-context.js';
+import { resolvePublicBaseUrl } from './services/public-base-url.js';
 import { authMiddleware } from './middleware/auth.js';
 import { webhook } from './routes/webhook.js';
 import { fugueBridge } from './routes/fugue-bridge.js';
@@ -45,6 +47,9 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
+    PUBLIC_BASE_URL?: string;
+    FUGUE_BRIDGE_TOKEN?: string;
+    PUBLIC_WEBHOOK_MAX_BODY_BYTES?: string;
   };
 };
 
@@ -128,28 +133,19 @@ async function scheduled(
   env: Env['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
-  // Get all active accounts from DB, plus the default env account
+  const publicBaseUrl = resolvePublicBaseUrl(env);
+  // Get all active accounts from DB and build scoped delivery contexts.
   const dbAccounts = await getLineAccounts(env.DB);
-  const activeTokens = new Set<string>();
+  const contexts = buildScheduledAccountContexts(env.LINE_CHANNEL_ACCESS_TOKEN, dbAccounts);
 
-  // Default account from env
-  activeTokens.add(env.LINE_CHANNEL_ACCESS_TOKEN);
-
-  // DB accounts
-  for (const account of dbAccounts) {
-    if (account.is_active) {
-      activeTokens.add(account.channel_access_token);
-    }
-  }
-
-  // Run delivery for each account
+  // Run delivery for each account context
   const jobs = [];
-  for (const token of activeTokens) {
-    const lineClient = new LineClient(token);
+  for (const context of contexts) {
+    const lineClient = new LineClient(context.token);
     jobs.push(
-      processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
-      processScheduledBroadcasts(env.DB, lineClient),
-      processReminderDeliveries(env.DB, lineClient),
+      processStepDeliveries(env.DB, lineClient, publicBaseUrl, context.lineAccountId),
+      processScheduledBroadcasts(env.DB, lineClient, context.lineAccountId),
+      processReminderDeliveries(env.DB, lineClient, context.lineAccountId),
     );
   }
   jobs.push(checkAccountHealth(env.DB));

@@ -41,7 +41,7 @@ cat > "$OUT_FILE" <<EOF
 ## Remaining operational tasks
 
 1. Create the final custom route for \`line-crm-worker\`.
-2. Point \`WORKER_URL\` and \`NEXT_PUBLIC_API_URL\` to that custom route.
+2. Point \`PUBLIC_BASE_URL\`, \`WORKER_URL\`, and \`NEXT_PUBLIC_API_URL\` to that custom route.
 3. Repoint \`LINE_HARNESS_WEBHOOK_URL\` in \`line-webhook-shadow-proxy\`.
 4. Update the LINE Developers webhook endpoint to the custom route.
 5. Observe both routes for 24-48 hours.

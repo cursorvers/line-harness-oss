@@ -29,6 +29,9 @@ jobs:
           report_path="$(bash scripts/generate-cloudflare-migration-report.sh artifacts/cloudflare-migration)"
           cat "$report_path" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Simulate custom-route cutover
+        run: bash scripts/simulate-cloudflare-cutover.sh https://api.example.com
+
       - name: Upload migration report
         uses: actions/upload-artifact@v4
         with:
