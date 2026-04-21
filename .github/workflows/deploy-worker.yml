@@ -26,6 +26,12 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      - run: bash scripts/check_cloudflare_surface.sh
+      - run: bash scripts/audit-workers-dev-references.sh
+      - name: Record Cloudflare migration status
+        run: |
+          report_path="$(bash scripts/generate-cloudflare-migration-report.sh artifacts/cloudflare-migration)"
+          cat "$report_path" >> "$GITHUB_STEP_SUMMARY"
       - run: pnpm --filter @line-crm/shared --filter @line-crm/line-sdk --filter @line-crm/db build
 
       - uses: cloudflare/wrangler-action@v3

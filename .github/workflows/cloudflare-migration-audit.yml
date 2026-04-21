@@ -1,0 +1,34 @@
+name: Cloudflare Migration Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/worker/**'
+      - 'packages/sdk/**'
+      - 'docs/**'
+      - 'scripts/audit-workers-dev-references.sh'
+      - 'scripts/generate-cloudflare-migration-report.sh'
+      - '.github/workflows/cloudflare-migration-audit.yml'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit workers.dev references
+        run: bash scripts/audit-workers-dev-references.sh
+
+      - name: Generate migration report
+        run: |
+          report_path="$(bash scripts/generate-cloudflare-migration-report.sh artifacts/cloudflare-migration)"
+          cat "$report_path" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload migration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-migration-report
+          path: artifacts/cloudflare-migration/
