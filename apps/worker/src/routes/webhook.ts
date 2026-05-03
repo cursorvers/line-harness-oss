@@ -197,6 +197,11 @@ async function handleEvent(
     if (!friend) return;
 
     const data = event.postback.data || '';
+    if (data.length > 300) {
+      console.warn('postback data too long, ignoring', { len: data.length, userId });
+      return;
+    }
+
     const params = new URLSearchParams(data);
     const menu = params.get('menu');
 
@@ -205,13 +210,26 @@ async function handleEvent(
       'free-materials': '無料教材',
     };
     const keyword = menu ? menuToKeyword[menu] : undefined;
-    if (!keyword) return;
+    if (keyword === undefined) {
+      console.warn('postback menu key unknown', { data, menu });
+      return;
+    }
+
+    const eventId = (event as unknown as { webhookEventId?: string }).webhookEventId;
+    const postbackLogId = eventId ? `pb_${eventId}` : crypto.randomUUID();
+    if (eventId) {
+      const existingPostback = await db
+        .prepare(`SELECT 1 FROM messages_log WHERE id = ? LIMIT 1`)
+        .bind(postbackLogId)
+        .first();
+      if (existingPostback) return;
+    }
 
     const rule = await db
       .prepare(
-        `SELECT * FROM auto_replies WHERE keyword = ? AND is_active = 1 AND (line_account_id IS NULL${lineAccountId ? ` OR line_account_id = '${lineAccountId}'` : ''}) ORDER BY created_at ASC LIMIT 1`,
+        `SELECT * FROM auto_replies WHERE keyword = ? AND is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC LIMIT 1`,
       )
-      .bind(keyword)
+      .bind(keyword, lineAccountId ?? '')
       .first<{
         id: string;
         keyword: string;
@@ -228,17 +246,18 @@ async function handleEvent(
         const replyMsg = buildMessage(rule.response_type, expandedContent);
         await lineClient.replyMessage(event.replyToken, [replyMsg]);
 
-        const outLogId = crypto.randomUUID();
         await db
           .prepare(
-            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
+            `INSERT OR IGNORE INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
              VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
           )
-          .bind(outLogId, friend.id, rule.response_type, rule.response_content, jstNow())
+          .bind(postbackLogId, friend.id, rule.response_type, rule.response_content, jstNow())
           .run();
       } catch (err) {
         console.error('Failed to reply postback', err);
       }
+    } else {
+      console.warn('postback rule miss', { keyword, lineAccountId, menu });
     }
 
     await fireEvent(db, 'postback_received', {
