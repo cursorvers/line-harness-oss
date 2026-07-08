@@ -14,7 +14,7 @@ import {
   getLineAccounts,
   jstNow,
 } from '@line-crm/db';
-import { fireEvent } from '../services/event-bus.js';
+import { fireEvent, getTelegramConfig } from '../services/event-bus.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
@@ -66,7 +66,7 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL, getTelegramConfig(c.env));
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -86,6 +86,7 @@ async function handleEvent(
   lineAccountId: string | null = null,
   workerUrl?: string,
   liffUrl?: string,
+  telegramConfig?: ReturnType<typeof getTelegramConfig>,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -174,7 +175,7 @@ async function handleEvent(
     }
 
     // イベントバス発火: friend_add
-    await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name } }, lineAccessToken, lineAccountId);
+    await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name } }, lineAccessToken, lineAccountId, telegramConfig);
     return;
   }
 
@@ -184,6 +185,86 @@ async function handleEvent(
     if (!userId) return;
 
     await updateFriendFollowStatus(db, userId, false);
+    return;
+  }
+
+  if (event.type === 'postback') {
+    const userId =
+      event.source.type === 'user' ? event.source.userId : undefined;
+    if (!userId) return;
+
+    const friend = await getFriendByLineUserId(db, userId);
+    if (!friend) return;
+
+    const data = event.postback.data || '';
+    if (data.length > 300) {
+      console.warn('postback data too long, ignoring', { len: data.length, userId });
+      return;
+    }
+
+    const params = new URLSearchParams(data);
+    const menu = params.get('menu');
+
+    const menuToKeyword: Record<string, string> = {
+      'substack': 'Substack',
+      'free-materials': '無料教材',
+    };
+    const keyword = menu ? menuToKeyword[menu] : undefined;
+    if (keyword === undefined) {
+      console.warn('postback menu key unknown', { data, menu });
+      return;
+    }
+
+    const eventId = (event as unknown as { webhookEventId?: string }).webhookEventId;
+    const postbackLogId = eventId ? `pb_${eventId}` : crypto.randomUUID();
+    if (eventId) {
+      const existingPostback = await db
+        .prepare(`SELECT 1 FROM messages_log WHERE id = ? LIMIT 1`)
+        .bind(postbackLogId)
+        .first();
+      if (existingPostback) return;
+    }
+
+    const rule = await db
+      .prepare(
+        `SELECT * FROM auto_replies WHERE keyword = ? AND is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC LIMIT 1`,
+      )
+      .bind(keyword, lineAccountId ?? '')
+      .first<{
+        id: string;
+        keyword: string;
+        match_type: 'exact' | 'contains';
+        response_type: string;
+        response_content: string;
+        is_active: number;
+        created_at: string;
+      }>();
+
+    if (rule) {
+      try {
+        const expandedContent = expandVariables(rule.response_content, friend as { id: string; display_name: string | null; user_id: string | null }, workerUrl);
+        const replyMsg = buildMessage(rule.response_type, expandedContent);
+        await lineClient.replyMessage(event.replyToken, [replyMsg]);
+
+        await db
+          .prepare(
+            `INSERT OR IGNORE INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
+             VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
+          )
+          .bind(postbackLogId, friend.id, rule.response_type, rule.response_content, jstNow())
+          .run();
+      } catch (err) {
+        console.error('Failed to reply postback', err);
+      }
+    } else {
+      console.warn('postback rule miss', { keyword, lineAccountId, menu });
+    }
+
+    await fireEvent(db, 'postback_received', {
+      friendId: friend.id,
+      eventData: { data, menu, matched: !!rule },
+    }, lineAccessToken, lineAccountId, telegramConfig);
+
     return;
   }
 
@@ -369,7 +450,7 @@ async function handleEvent(
     await fireEvent(db, 'message_received', {
       friendId: friend.id,
       eventData: { text: incomingText, matched },
-    }, lineAccessToken, lineAccountId);
+    }, lineAccessToken, lineAccountId, telegramConfig);
 
     return;
   }
